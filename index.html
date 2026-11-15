@@ -1019,101 +1019,12 @@
 
         /* ====== Hidden ====== */
         .hidden { display: none !important; }
-       /* ====== Design System ====== */
-        /* ... (existing design system variables) ... */
-
-        /* ====== Hidden ====== */
-        .hidden { display: none !important; }
-
-        /* ====== Buy Me A Coffee Button ====== */
-        .buy-coffee-btn {
-            position: fixed; /* חשוב כדי שירחף בצד */
-            bottom: var(--space-6); /* 24px מלמטה */
-            right: var(--space-6); /* 24px מצד ימין. אם תרצה בצד שמאל, שנה ל-left */
-            z-index: 2000; /* כדי שיופיע מעל רוב האלמנטים האחרים */
-            background: var(--primary-600); /* צבע רקע כחול מהעיצוב שלך */
-            color: var(--neutral-0); /* צבע טקסט לבן */
-            padding: var(--space-3) var(--space-5); /* ריפוד פנימי */
-            border-radius: var(--radius-xl); /* פינות עגולות מאוד */
-            display: flex;
-            align-items: center;
-            gap: var(--space-2); /* רווח בין האייקון לטקסט */
-            font-weight: 700; /* מודגש */
-            font-size: 1rem;
-            text-decoration: none; /* הסרת קו תחתון מקישור */
-            box-shadow: var(--shadow-md); /* צל */
-            transition: all var(--transition); /* מעברים חלקים בהובר */
-            -webkit-tap-highlight-color: transparent; /* הסרת הדגשת טאץ' במובייל */
-            direction: rtl; /* כדי לוודא שהטקסט מימין לשמאל */
-            text-align: right; /* יישור הטקסט לימין */
-        }
-
-        .buy-coffee-btn:hover {
-            background: var(--primary-700); /* צבע רקע כהה יותר בהובר */
-            box-shadow: var(--shadow-lg); /* צל גדול יותר */
-            transform: translateY(-2px); /* הרמה קלה למעלה בהובר */
-        }
-
-        .buy-coffee-btn .coffee-icon {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 24px; /* גודל אייקון */
-            height: 24px;
-            transform-origin: bottom center; /* נקודת הציר לסיבוב האנימציה */
-            animation: coffeeWiggle 2s ease-in-out infinite; /* הפעלת האנימציה */
-        }
-
-        .buy-coffee-btn .coffee-icon svg {
-            width: 100%;
-            height: 100%;
-            color: white; /* צבע האייקון */
-        }
-
-        /* הגדרת האנימציה "coffeeWiggle" */
-        @keyframes coffeeWiggle {
-            0%, 100% { transform: rotate(0deg); } /* מתחיל ונגמר ישר */
-            15% { transform: rotate(8deg); } /* מסתובב מעט ימינה */
-            30% { transform: rotate(-8deg); } /* מסתובב מעט שמאלה */
-            45% { transform: rotate(6deg); } /* תנועה קטנה יותר ימינה */
-            60% { transform: rotate(-6deg); } /* תנועה קטנה יותר שמאלה */
-            75% { transform: rotate(3deg); } /* תנועה אחרונה קלה ימינה */
-            90% { transform: rotate(-3deg); } /* תנועה אחרונה קלה שמאלה */
-        }
-
-        /* התאמה למסכים קטנים יותר */
-        @media (max-width: 600px) {
-            .buy-coffee-btn {
-                bottom: var(--space-4); /* 16px מלמטה */
-                right: var(--space-4); /* 16px מצד ימין */
-                padding: var(--space-2) var(--space-4); /* ריפוד קטן יותר */
-                font-size: 0.9rem; /* גודל טקסט קטן יותר */
-            }
-            .buy-coffee-btn .coffee-icon {
-                width: 20px; /* גודל אייקון קטן יותר */
-                height: 20px;
-            }
-        }
-        /* CSS חדש: מעטפת הטקסט בתוך הכפתור */
-        .buy-coffee-btn .button-text-container {
-            display: flex;
-            flex-direction: column; /* מסדר את הטקסטים אחד מעל השני */
-            align-items: flex-end; /* מיישר את שתי השורות לימין (בגלל dir="rtl") */
-            line-height: 1.2; /* מרווח שורות קטן יותר */
-        }
-
-        /* CSS חדש: עיצוב שער החליפין */
-        .buy-coffee-btn .exchange-rate-display {
-            font-size: 0.75rem; /* גודל טקסט קטן יותר */
-            font-weight: 400; /* משקל פחות בולט */
-            opacity: 0.8; /* שקיפות קלה */
-            white-space: nowrap; /* מונע שבירת שורה אם השער ארוך */
-        }
-
     </style>
   <meta property="og:image" content="https://bolt.new/static/og_default.png">
-  <!-- ... (rest of your head content) ... -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
 </head>
+<body>
 
 <!-- Header -->
 <header id="header">
@@ -1352,83 +1263,54 @@
     </div>
 </div>
 
+<!-- Camera Modal -->
+<div class="modal-overlay" id="cameraModal">
+    <div class="camera-modal">
+        <video id="cameraVideo" autoplay playsinline></video>
+        <div class="camera-controls">
+            <button class="camera-close" id="btnCameraClose">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <button class="capture-btn" id="btnCapture"></button>
+            <button class="camera-switch" id="btnCameraSwitch">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 19a4 4 0 0 1-4 4M18 11a4 4 0 0 1 4 4M15 18a4 4 0 0 1-4 4M6 5v4M18 5v4M3 9h6M15 9h6"/><path d="m7 7 8-4 2 3-8 4z"/></svg>
+            </button>
+        </div>
+    </div>
+</div>
 
-<!-- Buy Me A Coffee Button -->
-<a href="https://ko-fi.com/avivi0630000" target="_blank" rel="noopener" class="buy-coffee-btn">
-    <div class="coffee-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-mug-hot">
-            <path d="M18.82 9.53a2.12 2.12 0 0 1 0 3C18.4 13 17.65 13.4 17 13.7c-.57.3-1.2.46-1.85.46a4.2 4.2 0 0 1-4.2-4.2V8a2 2 0 0 1 2-2h4c1.1 0 2 .9 2 2v.53z"/>
-            <path d="M21 6H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.37"/>
-            <line x1="2" y1="20" x2="22" y2="20"/>
-        </svg>
+<!-- Preview Modal -->
+<div class="preview-modal" id="previewModal">
+    <img id="previewImg" src="" alt="תצוגה מקדימה">
+    <div class="preview-modal-actions">
+        <button class="btn btn-secondary" id="btnClosePreview">סגירה</button>
+        <button class="btn btn-primary" id="btnDownloadSingle">הורד</button>
     </div>
-    <div class="button-text-container">
-        <span>קנה לי קפה</span>
-        <span class="exchange-rate-display" id="exchangeRateDisplay">טוען שער...</span>
-    </div>
-</a>
+</div>
+
+<!-- Magnifier Loupe -->
+<div class="loupe" id="loupe">
+    <canvas id="loupeCanvas" width="140" height="140"></canvas>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">טוען OpenCV...</div>
+</div>
+
+<!-- Footer -->
+<footer>
+    <p>כל העיבוד נעשה בדפדפן שלך — התמונות שלך לא עוזבות את המכשיר.<br>
+    <a href="https://github.com" target="_blank" rel="noopener">קוד פתוח</a> · פרטיות מלאה · בנוי עם OpenCV.js</p>
+</footer>
 
 <!-- Scripts -->
 <script src="https://docs.opencv.org/4.9.0/opencv.js" async></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
-<script>
-    async function fetchExchangeRate() {
-        const exchangeRateDisplay = document.getElementById('exchangeRateDisplay');
-        if (!exchangeRateDisplay) {
-            console.error("Element with ID 'exchangeRateDisplay' not found.");
-            return;
-        }
-
-        // 1. הגדר תמיד את ברירת המחדל ל-"1$" בהתחלה
-        exchangeRateDisplay.textContent = '1$'; 
-
-        // 2. בדוק אם המשתמש במצב אופליין. אם כן, אין טעם להמשיך.
-        // הקוד הבא יבצע ניסיון טעינה רק אם יש חיבור אינטרנט.
-        if (!navigator.onLine) {
-            console.warn('Offline: Displaying default "$1".');
-            return; // צא מהפונקציה, אין צורך לנסות לטעון שער
-        }
-
-        // אם הגענו לכאן, אנחנו מחוברים לאינטרנט, אז ננסה לטעון את השער.
-        // נציג הודעת טעינה קצרה רק אם אנחנו מחוברים ומתחילים לנסות.
-        exchangeRateDisplay.textContent = 'טוען שער...'; // הודעת טעינה זמנית בזמן הפנייה ל-API
-
-
-        const API_KEY = 'b70b355874a75a831d04951f'; // <--- ודא שזה המפתח האמיתי שלך עם גרשיים
-        const API_URL = `https://v6.exchangerate-api.com/v6/${API_KEY}/latest/USD`;
-
-        try {
-            const response = await fetch(API_URL); // מבצע בקשת רשת
-            
-            if (!response.ok) { 
-                const errorData = await response.json(); // נסה לנתח את השגיאה
-                console.error('Failed to fetch exchange rate (API error):', errorData.error_type || response.statusText);
-                exchangeRateDisplay.textContent = '1$'; // חזור לברירת מחדל במקרה של שגיאת API/שרת
-                return;
-            }
-
-            const data = await await response.json(); // מנתח את התשובה כ-JSON
-            const usdToIlsRate = data.conversion_rates.ILS; // מוציא את שער ה-ILS
-
-            if (usdToIlsRate) {
-                const formattedRate = usdToIlsRate.toFixed(2); // מעגל לשתי ספרות אחרי הנקודה
-                exchangeRateDisplay.textContent = `1$ = ${formattedRate}₪`; // מעדכן את הטקסט
-            } else {
-                console.warn('ILS rate not found in API response.');
-                exchangeRateDisplay.textContent = '1$'; // חזור לברירת מחדל אם ILS לא נמצא
-            }
-        } catch (error) {
-            // אם הבקשה נכשלה בשלב ה-fetch (למשל, בעיות רשת במהלך הבקשה),
-            // נחזור להציג "1$"
-            console.error('Error fetching exchange rate (network error):', error);
-            exchangeRateDisplay.textContent = '1$'; // הצג "1$" במקרה של שגיאת רשת
-        }
-    }
-
-    // קורא לפונקציה ברגע שהמסמך נטען במלואו
-    document.addEventListener('DOMContentLoaded', fetchExchangeRate);
-</script>
-
 </body>
 </html>
