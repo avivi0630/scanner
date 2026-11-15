@@ -10,32 +10,30 @@
     // ===== State =====
     const state = {
         cvReady: false,
-        currentImage: null,       // HTMLImageElement / Image object
-        currentImageCanvas: null, // offscreen canvas of the source image
-        corners: [],              // [{x,y}, ...] 4 points in image coords
-        rotation: 0,              // 0, 90, 180, 270
+        currentImage: null,
+        currentImageCanvas: null,
+        corners: [],
+        rotation: 0,
         draggedCorner: -1,
-        scale: 1,                 // display scale factor
-        offsetX: 0,
-        offsetY: 0,
+        hoverCorner: -1,
+        displayScale: 1,
         filter: 'grayscale',
         brightness: 0,
         contrast: 0,
-        warpedCanvas: null,       // result after perspective transform
-        filteredCanvas: null,     // result after filter
-        pages: [],                // array of { id, dataUrl, name, width, height }
+        warpedCanvas: null,
+        filteredCanvas: null,
+        pages: [],
         cameraStream: null,
         cameraFacing: 'environment',
     };
 
-    // ===== DOM refs =====
     const $ = id => document.getElementById(id);
 
-    // ===== Utils =====
-    function showToast(msg, type = '') {
+    // ===== Toast / Loading =====
+    function showToast(msg, type) {
         const container = $('toastContainer');
         const toast = document.createElement('div');
-        toast.className = 'toast ' + type;
+        toast.className = 'toast ' + (type || '');
         const icon = type === 'success'
             ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
             : type === 'error'
@@ -77,17 +75,13 @@
         $('uploadStep').classList.add('hidden');
         $('editStep').classList.add('hidden');
         $('filterStep').classList.add('hidden');
-        if (step === 'upload') $('uploadStep').classList.remove('hidden');
-        if (step === 'edit') $('editStep').classList.remove('hidden');
-        if (step === 'filter') $('filterStep').classList.remove('hidden');
+        $(step + 'Step').classList.remove('hidden');
     }
 
     // ===== File Upload =====
     function handleFileSelect(e) {
         const files = e.target.files;
-        if (files && files.length > 0) {
-            loadImageFile(files[0]);
-        }
+        if (files && files.length > 0) loadImageFile(files[0]);
     }
 
     function loadImageFile(file) {
@@ -114,17 +108,17 @@
     function enterEditMode() {
         showStep('edit');
         prepareEditCanvas();
-        drawEditCanvas();
-        // Run auto-detect in the background without blocking UI
-        autoDetectCorners();
+        requestAnimationFrame(() => {
+            drawEditCanvas();
+            autoDetectCorners(true);
+        });
     }
 
-    // ===== Edit Canvas (corner selection) =====
+    // ===== Edit Canvas Setup =====
     function prepareEditCanvas() {
         const img = state.currentImage;
         if (!img) return;
 
-        // Create offscreen canvas with rotation applied
         const tmp = document.createElement('canvas');
         const ctx = tmp.getContext('2d');
         const r = state.rotation;
@@ -140,12 +134,17 @@
         ctx.drawImage(img, -img.width / 2, -img.height / 2);
         state.currentImageCanvas = tmp;
 
-        // Reset corners to full image
+        resetCorners();
+    }
+
+    function resetCorners() {
+        const src = state.currentImageCanvas;
+        if (!src) return;
         state.corners = [
             { x: 0, y: 0 },
-            { x: tmp.width, y: 0 },
-            { x: tmp.width, y: tmp.height },
-            { x: 0, y: tmp.height },
+            { x: src.width, y: 0 },
+            { x: src.width, y: src.height },
+            { x: 0, y: src.height },
         ];
     }
 
@@ -153,80 +152,82 @@
         const canvas = $('editCanvas');
         const area = $('canvasArea');
         const src = state.currentImageCanvas;
-        if (!src) return;
+        if (!src || !area) return;
 
-        const areaW = area.clientWidth - 16;
+        const areaW = Math.max(100, area.clientWidth - 16);
         const maxH = 450;
         const scale = Math.min(areaW / src.width, maxH / src.height, 1);
-        state.scale = scale;
+        state.displayScale = Math.max(0.01, scale);
 
-        canvas.width = src.width * scale;
-        canvas.height = src.height * scale;
+        const dispW = Math.round(src.width * state.displayScale);
+        const dispH = Math.round(src.height * state.displayScale);
+
+        canvas.width = dispW;
+        canvas.height = dispH;
 
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(src, 0, 0, dispW, dispH);
 
-        // Draw semi-transparent mask outside corners
+        // Dark mask outside corners (evenodd punch-out)
+        const s = state.displayScale;
+        const c = state.corners;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(canvas.width, 0);
-        ctx.lineTo(canvas.width, canvas.height);
-        ctx.lineTo(0, canvas.height);
+        ctx.lineTo(dispW, 0);
+        ctx.lineTo(dispW, dispH);
+        ctx.lineTo(0, dispH);
         ctx.closePath();
-        // Cut out the quad
-        const c = state.corners;
-        ctx.moveTo(c[0].x * scale, c[0].y * scale);
-        for (let i = 1; i < 4; i++) {
-            ctx.lineTo(c[i].x * scale, c[i].y * scale);
-        }
+        ctx.moveTo(c[0].x * s, c[0].y * s);
+        for (let i = 1; i < 4; i++) ctx.lineTo(c[i].x * s, c[i].y * s);
         ctx.closePath();
         ctx.fill('evenodd');
 
-        // Draw the quad outline
+        // Quad outline
         ctx.strokeStyle = '#06c987';
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(c[0].x * scale, c[0].y * scale);
-        for (let i = 1; i < 4; i++) {
-            ctx.lineTo(c[i].x * scale, c[i].y * scale);
-        }
+        ctx.moveTo(c[0].x * s, c[0].y * s);
+        for (let i = 1; i < 4; i++) ctx.lineTo(c[i].x * s, c[i].y * s);
         ctx.closePath();
         ctx.stroke();
 
-        // Draw corner handles
-        const handleColors = ['#3366ff', '#06c987', '#f59e0b', '#ef4444'];
+        // Corner handles
+        const colors = ['#3366ff', '#06c987', '#f59e0b', '#ef4444'];
         for (let i = 0; i < 4; i++) {
-            const x = c[i].x * scale;
-            const y = c[i].y * scale;
-            // Outer ring
+            const x = c[i].x * s;
+            const y = c[i].y * s;
+            const isDragged = i === state.draggedCorner;
+            const isHover = i === state.hoverCorner;
+            const r1 = isDragged || isHover ? 16 : 13;
+            const r2 = isDragged || isHover ? 9 : 7;
             ctx.beginPath();
-            ctx.arc(x, y, 14, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.arc(x, y, r1, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
             ctx.fill();
-            // Inner dot
             ctx.beginPath();
-            ctx.arc(x, y, 8, 0, Math.PI * 2);
-            ctx.fillStyle = handleColors[i];
+            ctx.arc(x, y, r2, 0, Math.PI * 2);
+            ctx.fillStyle = colors[i];
             ctx.fill();
         }
     }
 
-    // ===== Corner interaction =====
+    // ===== Corner Interaction =====
+    // Convert screen touch/click coordinates to image coordinates
     function getCanvasPos(e) {
         const canvas = $('editCanvas');
         const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        // Convert from screen pixels to canvas internal pixels,
-        // then from canvas internal pixels to image coordinates.
+        // Screen -> canvas pixel ratio
         const ratioX = canvas.width / rect.width;
         const ratioY = canvas.height / rect.height;
         const canvasX = (clientX - rect.left) * ratioX;
         const canvasY = (clientY - rect.top) * ratioY;
+        // Canvas pixel -> image coordinate
         return {
-            x: canvasX / state.scale,
-            y: canvasY / state.scale,
+            x: canvasX / state.displayScale,
+            y: canvasY / state.displayScale,
             screenX: clientX,
             screenY: clientY,
         };
@@ -234,7 +235,7 @@
 
     function findNearestCorner(pos) {
         let minDist = Infinity;
-        let idx = -1;
+        let idx = 0;
         for (let i = 0; i < 4; i++) {
             const dx = state.corners[i].x - pos.x;
             const dy = state.corners[i].y - pos.y;
@@ -244,35 +245,58 @@
                 idx = i;
             }
         }
-        // Threshold: 40px in display space
-        if (minDist / state.scale < 40) return idx;
-        return -1;
+        // Always return the nearest corner — no threshold.
+        // The user can grab any corner by clicking near it.
+        return idx;
     }
 
     function onCanvasDown(e) {
         e.preventDefault();
+        const canvas = $('editCanvas');
+        // Capture the pointer so we keep receiving move/up events
+        // even if the finger/cursor leaves the canvas element
+        if (e.pointerId !== undefined && canvas.setPointerCapture) {
+            try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+        }
         const pos = getCanvasPos(e);
         const idx = findNearestCorner(pos);
-        if (idx >= 0) {
-            state.draggedCorner = idx;
-            showLoupe(pos);
-        }
+        state.draggedCorner = idx;
+        showLoupe(pos);
+        drawEditCanvas();
     }
 
     function onCanvasMove(e) {
-        if (state.draggedCorner < 0) return;
-        e.preventDefault();
-        const pos = getCanvasPos(e);
-        const src = state.currentImageCanvas;
-        state.corners[state.draggedCorner].x = Math.max(0, Math.min(src.width, pos.x));
-        state.corners[state.draggedCorner].y = Math.max(0, Math.min(src.height, pos.y));
-        drawEditCanvas();
-        showLoupe(pos);
+        if (state.draggedCorner >= 0) {
+            e.preventDefault();
+            const pos = getCanvasPos(e);
+            const src = state.currentImageCanvas;
+            state.corners[state.draggedCorner].x = Math.max(0, Math.min(src.width, pos.x));
+            state.corners[state.draggedCorner].y = Math.max(0, Math.min(src.height, pos.y));
+            drawEditCanvas();
+            showLoupe(pos);
+        } else if (!e.buttons) {
+            // Hover detection for cursor feedback
+            const pos = getCanvasPos(e);
+            const idx = findNearestCorner(pos);
+            if (idx !== state.hoverCorner) {
+                state.hoverCorner = idx;
+                const canvas = $('editCanvas');
+                canvas.style.cursor = idx >= 0 ? 'grab' : 'crosshair';
+                drawEditCanvas();
+            }
+        }
     }
 
-    function onCanvasUp() {
-        state.draggedCorner = -1;
-        hideLoupe();
+    function onCanvasUp(e) {
+        if (state.draggedCorner >= 0) {
+            const canvas = $('editCanvas');
+            if (e && e.pointerId !== undefined && canvas.releasePointerCapture) {
+                try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+            }
+            state.draggedCorner = -1;
+            hideLoupe();
+            drawEditCanvas();
+        }
     }
 
     // ===== Magnifier Loupe =====
@@ -281,33 +305,26 @@
         if (!loupe) return;
         const src = state.currentImageCanvas;
         if (!src) return;
-
         const corner = state.corners[state.draggedCorner];
         if (!corner) return;
 
         const loupeSize = 140;
         const zoom = 2.5;
-
         const canvas = $('loupeCanvas');
         canvas.width = loupeSize;
         canvas.height = loupeSize;
         const ctx = canvas.getContext('2d');
 
-        // Source region in image coordinates
         const srcW = loupeSize / zoom;
         const srcH = loupeSize / zoom;
         const sx = corner.x - srcW / 2;
         const sy = corner.y - srcH / 2;
 
-        // Fill white background
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, loupeSize, loupeSize);
-
-        // Draw zoomed image region
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(src, sx, sy, srcW, srcH, 0, 0, loupeSize, loupeSize);
 
-        // Draw crosshair at center
         ctx.strokeStyle = 'rgba(51, 102, 255, 0.8)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -317,19 +334,14 @@
         ctx.lineTo(loupeSize / 2, loupeSize / 2 + 12);
         ctx.stroke();
 
-        // Draw center circle
         ctx.beginPath();
         ctx.arc(loupeSize / 2, loupeSize / 2, 6, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(6, 201, 135, 0.9)';
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Position loupe near cursor but not overlapping it
-        // In RTL mode, place to the left of cursor
         let loupeX = pos.screenX - loupeSize - 20;
         let loupeY = pos.screenY - loupeSize - 20;
-
-        // Keep on screen
         if (loupeX < 8) loupeX = pos.screenX + 20;
         if (loupeY < 8) loupeY = pos.screenY + 20;
         if (loupeX + loupeSize > window.innerWidth - 8) loupeX = window.innerWidth - loupeSize - 8;
@@ -345,11 +357,10 @@
         if (loupe) loupe.classList.remove('show');
     }
 
-    // ===== Auto Detect Corners (OpenCV) =====
-    async function autoDetectCorners() {
+    // ===== Auto Detect Corners =====
+    async function autoDetectCorners(silent) {
         if (!state.currentImageCanvas) return;
 
-        // Downscale for detection to avoid hanging on large images
         const fullCanvas = state.currentImageCanvas;
         const maxDim = 500;
         const detectScale = Math.min(1, maxDim / Math.max(fullCanvas.width, fullCanvas.height));
@@ -367,10 +378,11 @@
             const blur = new cv.Mat();
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
             const edges = new cv.Mat();
-            cv.Canny(blur, edges, 30, 100);
+            cv.Canny(blur, edges, 20, 80);
 
             const kernel = cv.Mat.ones(5, 5, cv.CV_8U);
             cv.dilate(edges, edges, kernel);
+            cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, kernel);
 
             const contours = new cv.MatVector();
             const hierarchy = new cv.Mat();
@@ -383,17 +395,17 @@
             for (let i = 0; i < contours.size(); i++) {
                 const cnt = contours.get(i);
                 const area = cv.contourArea(cnt);
-                if (area < imgArea * 0.15 || area > imgArea * 0.98) {
+                if (area < imgArea * 0.1 || area > imgArea * 0.98) {
                     cnt.delete();
                     continue;
                 }
                 const approx = new cv.Mat();
-                cv.approxPolyDP(cnt, approx, 0.02 * cv.arcLength(cnt, true), true);
+                const peri = cv.arcLength(cnt, true);
+                cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
                 if (approx.rows === 4 && area > bestArea) {
                     bestArea = area;
                     bestQuad = [];
                     for (let j = 0; j < 4; j++) {
-                        // Scale back to full image coordinates
                         bestQuad.push({
                             x: approx.data32S[j * 2] / detectScale,
                             y: approx.data32S[j * 2 + 1] / detectScale,
@@ -408,8 +420,8 @@
                 bestQuad = sortCorners(bestQuad);
                 state.corners = bestQuad;
                 drawEditCanvas();
-                showToast('פינות זוהו אוטומטית', 'success');
-            } else {
+                if (!silent) showToast('פינות זוהו אוטומטית', 'success');
+            } else if (!silent) {
                 showToast('לא זוהו פינות אוטומטית — סמנו ידנית');
             }
 
@@ -417,16 +429,14 @@
             contours.delete(); hierarchy.delete(); kernel.delete();
         } catch (err) {
             console.error('Auto detect error:', err);
-            showToast('זיהוי אוטומטי נכשל — סמנו ידנית', 'error');
+            if (!silent) showToast('זיהוי אוטומטי נכשל — סמנו ידנית', 'error');
         }
     }
 
     function sortCorners(pts) {
-        // Sort by Y first, then X
         const sorted = pts.slice().sort((a, b) => a.y - b.y);
         const top = sorted.slice(0, 2).sort((a, b) => a.x - b.x);
         const bottom = sorted.slice(2).sort((a, b) => a.x - b.x);
-        // TL, TR, BR, BL
         return [top[0], top[1], bottom[1], bottom[0]];
     }
 
@@ -438,7 +448,6 @@
             const src = cv.imread(state.currentImageCanvas);
             const c = sortCorners(state.corners);
 
-            // Determine output size
             const wTop = Math.hypot(c[1].x - c[0].x, c[1].y - c[0].y);
             const wBottom = Math.hypot(c[2].x - c[3].x, c[2].y - c[3].y);
             const hLeft = Math.hypot(c[3].x - c[0].x, c[3].y - c[0].y);
@@ -454,14 +463,13 @@
             ]);
             const M = cv.getPerspectiveTransform(srcPts, dstPts);
             const dst = new cv.Mat();
-            cv.warpPerspective(src, dst, M, new cv.Size(maxW, maxH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
+            cv.warpPerspective(src, dst, M, new cv.Size(maxW, maxH),
+                cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
 
-            // Convert to canvas
             const outCanvas = document.createElement('canvas');
             outCanvas.width = maxW;
             outCanvas.height = maxH;
             cv.imshow(outCanvas, dst);
-
             state.warpedCanvas = outCanvas;
 
             src.delete(); srcPts.delete(); dstPts.delete(); M.delete(); dst.delete();
@@ -487,32 +495,28 @@
         const b = state.brightness;
         const c = state.contrast;
 
-        // Apply brightness/contrast via filter
         ctx.filter = '';
         ctx.imageSmoothingEnabled = true;
 
         if (filter === 'color') {
-            // Just brightness/contrast
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.filter = `brightness(${100 + b}%) contrast(${100 + c}%)`;
+            ctx.filter = 'brightness(' + (100 + b) + '%) contrast(' + (100 + c) + '%)';
             ctx.drawImage(src, 0, 0);
             ctx.filter = 'none';
+            state.filteredCanvas = canvas;
         } else if (filter === 'grayscale') {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.filter = `grayscale(100%) brightness(${100 + b}%) contrast(${100 + c}%)`;
+            ctx.filter = 'grayscale(100%) brightness(' + (100 + b) + '%) contrast(' + (100 + c) + '%)';
             ctx.drawImage(src, 0, 0);
             ctx.filter = 'none';
+            state.filteredCanvas = canvas;
         } else if (filter === 'bw' || filter === 'magic' || filter === 'enhanced') {
             applyOpenCVFilter(filter, b, c, canvas);
-            return;
         }
-
-        state.filteredCanvas = canvas;
     }
 
     function applyOpenCVFilter(filter, brightness, contrast, outCanvas) {
         if (!state.cvReady) {
-            // Fallback to simple approach
             applyCanvasBWSimple(outCanvas);
             state.filteredCanvas = outCanvas;
             return;
@@ -522,16 +526,13 @@
             const dst = new cv.Mat();
 
             if (filter === 'bw') {
-                // Black & white - adaptive threshold
                 const gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
                 cv.adaptiveThreshold(gray, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 15, 10);
                 cv.cvtColor(dst, dst, cv.COLOR_GRAY2RGBA);
                 gray.delete();
             } else if (filter === 'enhanced') {
-                // Enhanced color - increase saturation and contrast
                 cv.cvtColor(src, dst, cv.COLOR_RGBA2RGB);
-                // CLAHE on L channel
                 const lab = new cv.Mat();
                 cv.cvtColor(dst, lab, cv.COLOR_RGB2Lab);
                 const channels = new cv.MatVector();
@@ -545,9 +546,7 @@
                 cv.cvtColor(lab, dst, cv.COLOR_Lab2RGBA);
                 lab.delete(); channels.delete(); lEnhanced.delete(); clahe.delete();
             } else if (filter === 'magic') {
-                // Magic color - white balance + enhance
                 cv.cvtColor(src, dst, cv.COLOR_RGBA2RGB);
-                // Simple white balance: scale each channel so max is 255
                 const channels = new cv.MatVector();
                 cv.split(dst, channels);
                 for (let i = 0; i < 3; i++) {
@@ -557,7 +556,6 @@
                     cv.meanStdDev(ch, mean, stddev);
                     const m = mean.data64F[0];
                     const s = stddev.data64F[0];
-                    // Stretch histogram
                     const alpha = 128 / (s || 1);
                     const beta = 128 - m * alpha;
                     ch.convertTo(ch, ch.type(), alpha, beta);
@@ -567,7 +565,6 @@
                 cv.cvtColor(dst, dst, cv.COLOR_RGB2RGBA);
                 channels.delete();
 
-                // Then apply adaptive threshold-like for clean look
                 const gray = new cv.Mat();
                 cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY);
                 const result = new cv.Mat();
@@ -576,7 +573,6 @@
                 gray.delete(); result.delete();
             }
 
-            // Apply brightness/contrast
             if (brightness !== 0 || contrast !== 0) {
                 const alpha = 1 + contrast / 100;
                 const beta = brightness * 2.55;
@@ -609,7 +605,7 @@
         ctx.putImageData(imgData, 0, 0);
     }
 
-    // ===== Pages management =====
+    // ===== Pages =====
     function saveCurrentPage() {
         if (!state.filteredCanvas) {
             showToast('אין תוצאה לשמירה', 'error');
@@ -635,12 +631,9 @@
         const count = state.pages.length;
         $('pageCount').textContent = count + (count === 1 ? ' דף' : ' דפים');
 
-        const exportBtn = $('btnExportPDF');
-        const pngBtn = $('btnExportPNG');
-        const clearBtn = $('btnClearAll');
-        exportBtn.disabled = count === 0;
-        pngBtn.disabled = count === 0;
-        clearBtn.disabled = count === 0;
+        $('btnExportPDF').disabled = count === 0;
+        $('btnExportPNG').disabled = count === 0;
+        $('btnClearAll').disabled = count === 0;
 
         if (count === 0) {
             list.innerHTML = '<div class="empty-state">' +
@@ -656,7 +649,7 @@
             item.innerHTML =
                 '<div class="page-thumb"><img src="' + page.dataUrl + '" alt=""></div>' +
                 '<div class="page-info"><div class="page-name">' + page.name + '</div>' +
-                '<div class="page-meta">' + page.width + '×' + page.height + 'px</div></div>' +
+                '<div class="page-meta">' + page.width + 'x' + page.height + 'px</div></div>' +
                 '<div class="page-actions">' +
                 '<button class="page-btn" data-action="view" data-idx="' + idx + '" title="תצוגה"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
                 '<button class="page-btn" data-action="up" data-idx="' + idx + '" title="העלה"' + (idx === 0 ? ' disabled' : '') + '><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>' +
@@ -690,32 +683,22 @@
         }
     }
 
-    // ===== Export PDF =====
+    // ===== Export =====
     function exportPDF() {
         if (state.pages.length === 0) return;
         showLoading('יוצר PDF...');
         try {
             const { jsPDF } = window.jspdf;
             let pdf = null;
-
             state.pages.forEach((page, i) => {
-                const img = new Image();
-                img.src = page.dataUrl;
-                // We need to load synchronously, but since dataUrl is already loaded in pagesList
-                // Use the existing data
                 const orientation = page.width > page.height ? 'l' : 'p';
                 if (i === 0) {
-                    pdf = new jsPDF({
-                        orientation: orientation,
-                        unit: 'px',
-                        format: [page.width, page.height],
-                    });
+                    pdf = new jsPDF({ orientation, unit: 'px', format: [page.width, page.height] });
                 } else {
                     pdf.addPage([page.width, page.height], orientation);
                 }
                 pdf.addImage(page.dataUrl, 'PNG', 0, 0, page.width, page.height);
             });
-
             pdf.save('scan_' + Date.now() + '.pdf');
             showToast('PDF נוצר בהצלחה', 'success');
         } catch (err) {
@@ -780,8 +763,7 @@
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0);
+        canvas.getContext('2d').drawImage(video, 0, 0);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
         closeCamera();
 
@@ -832,22 +814,17 @@
         $('btnCapture').addEventListener('click', capturePhoto);
         $('btnCameraSwitch').addEventListener('click', switchCamera);
 
-        // Edit step
-        $('btnAutoDetect').addEventListener('click', autoDetectCorners);
+        // Edit step toolbar
+        $('btnAutoDetect').addEventListener('click', () => autoDetectCorners(false));
         $('btnResetCorners').addEventListener('click', () => {
-            const src = state.currentImageCanvas;
-            state.corners = [
-                { x: 0, y: 0 },
-                { x: src.width, y: 0 },
-                { x: src.width, y: src.height },
-                { x: 0, y: src.height },
-            ];
+            resetCorners();
             drawEditCanvas();
         });
         $('btnRotate').addEventListener('click', () => {
             state.rotation = (state.rotation + 90) % 360;
             prepareEditCanvas();
-            autoDetectCorners();
+            drawEditCanvas();
+            autoDetectCorners(true);
         });
         $('btnBackToUpload').addEventListener('click', () => {
             showStep('upload');
@@ -861,18 +838,17 @@
             }
         });
 
-        // Canvas interaction
+        // Canvas interaction — pointer events for unified mouse + touch
         const canvas = $('editCanvas');
-        canvas.addEventListener('mousedown', onCanvasDown);
-        canvas.addEventListener('mousemove', onCanvasMove);
-        canvas.addEventListener('mouseup', onCanvasUp);
-        canvas.addEventListener('mouseleave', onCanvasUp);
-        canvas.addEventListener('touchstart', onCanvasDown, { passive: false });
-        canvas.addEventListener('touchmove', onCanvasMove, { passive: false });
-        canvas.addEventListener('touchend', onCanvasUp);
+        canvas.addEventListener('pointerdown', onCanvasDown);
+        canvas.addEventListener('pointermove', onCanvasMove);
+        canvas.addEventListener('pointerup', onCanvasUp);
+        canvas.addEventListener('pointerleave', onCanvasUp);
+        // Prevent default touch behavior that steals events
+        canvas.style.touchAction = 'none';
 
         // Show hint on canvas interaction
-        canvas.addEventListener('mousedown', () => {
+        canvas.addEventListener('pointerdown', () => {
             const hint = $('canvasHint');
             hint.classList.add('show');
             setTimeout(() => hint.classList.remove('show'), 2500);
@@ -901,9 +877,7 @@
         });
 
         $('btnBackToEdit').addEventListener('click', () => showStep('edit'));
-        $('btnAddAnother').addEventListener('click', () => {
-            saveCurrentPage();
-        });
+        $('btnAddAnother').addEventListener('click', saveCurrentPage);
         $('btnSavePage').addEventListener('click', saveCurrentPage);
 
         // Pages
@@ -931,10 +905,19 @@
             $('header').classList.toggle('scrolled', window.scrollY > 10);
         });
 
-        // Preload OpenCV
-        waitOpenCV().then(() => {
-            console.log('OpenCV.js ready');
+        // Redraw on window resize (canvas area width may change)
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (state.currentImageCanvas && !$('editStep').classList.contains('hidden')) {
+                    drawEditCanvas();
+                }
+            }, 200);
         });
+
+        // Preload OpenCV
+        waitOpenCV().then(() => console.log('OpenCV.js ready'));
 
         renderPagesList();
     }
